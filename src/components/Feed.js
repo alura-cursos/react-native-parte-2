@@ -1,11 +1,11 @@
 import React, { Component } from 'react';
 import {
-  AppRegistry,
-  StyleSheet,
   FlatList,
-  Platform
+  AsyncStorage,
 } from 'react-native';
 import Post from './Post';
+import InstaluraFetchService from '../services/InstaluraFetchService';
+import Notificacao from '../api/Notificacao';
 
 export default class Feed extends Component {
 
@@ -17,9 +17,8 @@ export default class Feed extends Component {
   }
 
   componentDidMount() {
-    fetch('http://localhost:8080/api/public/fotos/rafael')
-      .then(resposta => resposta.json())
-      .then(json => this.setState({fotos: json}))
+    InstaluraFetchService.get('/fotos')
+      .then(json => this.setState({fotos: json}));
   }
 
   buscaPorId(idFoto) {
@@ -34,48 +33,63 @@ export default class Feed extends Component {
   }
 
   like(idFoto) {
+    const listaOriginal = this.state.fotos;
     const foto = this.buscaPorId(idFoto);
 
-    let novaLista = []
-    if(!foto.likeada) {
-      novaLista = [
-        ...foto.likers,
-        {login: 'meuUsuario'}
-      ]
-    } else {
-      novaLista = foto.likers.filter(liker => {
-        return liker.login !== 'meuUsuario'
+    AsyncStorage.getItem('usuario')
+      .then(usuarioLogado => {
+
+        let novaLista = []
+        if(!foto.likeada) {
+          novaLista = [
+            ...foto.likers,
+            {login: usuarioLogado}
+          ]
+        } else {
+          novaLista = foto.likers.filter(liker => {
+            return liker.login !== usuarioLogado
+          })
+        }
+        return novaLista;
       })
-    }
+      .then(novaLista => {
+        const fotoAtualizada = {
+          ...foto,
+          likeada: !foto.likeada,
+          likers: novaLista
+        }
 
-    const fotoAtualizada = {
-      ...foto,
-      likeada: !foto.likeada,
-      likers: novaLista
-    }
+        this.atualizaFotos(fotoAtualizada);
+      });
 
-    this.atualizaFotos(fotoAtualizada);
+    InstaluraFetchService.post(`/fotos/${idFoto}/like`)
+      .catch(e => {
+        this.setState({fotos: listaOriginal})
+        Notificacao.exibe('Ops..', 'Algo deu errado!')
+      });
   }
 
   adicionaComentario(idFoto, valorComentario, inputComentario) {
     if(valorComentario === '')
       return;
 
-    const foto = this.buscaPorId(idFoto)
-
-    const novaLista = [...foto.comentarios, {
-      id: valorComentario,
-      login: 'meuUsuario',
+    const foto = this.buscaPorId(idFoto);
+    const comentario = {
       texto: valorComentario
-    }];
+    };
 
-    const fotoAtualizada = {
-      ...foto,
-      comentarios: novaLista
-    }
+    InstaluraFetchService.post(`/fotos/${idFoto}/comment`, comentario)
+      .then(comentario => [...foto.comentarios, comentario])
+      .then(novaLista => {
+        const fotoAtualizada = {
+          ...foto,
+          comentarios: novaLista
+        }
 
-    this.atualizaFotos(fotoAtualizada);
-    inputComentario.clear();
+        this.atualizaFotos(fotoAtualizada);
+        inputComentario.clear();
+      })
+      .catch(e => Notificacao.exibe('Ops!', 'Não foi possível adicionar comentario.'));
   }
 
   render() {
